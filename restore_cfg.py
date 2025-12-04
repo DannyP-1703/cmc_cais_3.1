@@ -38,21 +38,15 @@ class BB:
         self,
         start_address: int,
         size: int,
-        instrs: list[Tracepoint] = None,
         label: str = "",
     ):
         self.start_address = start_address
         self.size = size
-        self.instrs = instrs or []
         self.__label = label
         self.succs: list[BB] = []
 
     def __contains__(self, address: int) -> bool:
-        return self.start_address < address < self.start_address + self.size
-
-    @property
-    def instr_cnt(self) -> int:
-        return len(self.instrs)
+        return self.start_address <= address < self.start_address + self.size
 
     @property
     def label(self) -> str:
@@ -66,24 +60,14 @@ class BB:
     def split(self, entry_address: Tracepoint) -> "BB":
         assert entry_address in self
 
-        entry_tp_indx = -1
-        for i, tp in enumerate(self.instrs):
-            if tp.address == entry_address:
-                entry_tp_indx = i
-                break
-
-        assert entry_tp_indx > -1
-
         new_bb = BB(
             entry_address,
             self.size - entry_address + self.start_address,
-            instrs=self.instrs[entry_tp_indx:],
             label=self.__label,
         )
-        self.size = entry_address - self.start_address
-        self.instrs = self.instrs[:entry_tp_indx]
-
         new_bb.succs = [succ for succ in self.succs]
+
+        self.size = entry_address - self.start_address
         self.succs = [new_bb]
         return new_bb
 
@@ -99,26 +83,19 @@ def restore_cfg(tracepoints: list[Tracepoint]) -> dict[int, BB]:
     cfg: dict[int, BB] = {}
     start_tp_idx: int = 0
     tp_indx: int = start_tp_idx
+    trace_len = len(tracepoints)
 
-    while tp_indx < len(tracepoints):
+    while tp_indx < trace_len:
         tp = tracepoints[tp_indx]
 
         # bb ends on branch or when next tp is labeled
-        if (
-            not tp.is_branch
-            and tp_indx + 1 < len(tracepoints)
-            and tracepoints[tp_indx + 1].address not in cfg
-        ):
+        if not tp.is_branch and tp_indx + 1 < trace_len and tracepoints[tp_indx + 1].address not in cfg:
             tp_indx += 1
             continue
 
         start_address = tracepoints[start_tp_idx].address
         end_address = tp.address + len(bytes.fromhex(tp.hexdump))
-        B = BB(
-            start_address,
-            end_address - start_address,
-            tracepoints[start_tp_idx : tp_indx + 1],
-        )
+        B = BB(start_address, end_address - start_address)
         cfg[B.start_address] = B
 
         if B_prev is not None:
@@ -141,7 +118,7 @@ def restore_cfg(tracepoints: list[Tracepoint]) -> dict[int, BB]:
                 make_edge(B_prev, B)
                 B_prev = B
 
-            if tp_indx >= len(tracepoints):
+            if tp_indx >= trace_len:
                 break
 
             tp = tracepoints[start_tp_idx]
@@ -158,7 +135,8 @@ def restore_cfg(tracepoints: list[Tracepoint]) -> dict[int, BB]:
             if B is None:
                 break
             make_edge(B_prev, B)
-            tp_indx = start_tp_idx + B.instr_cnt
+            while tp_indx < trace_len and tracepoints[tp_indx].address in B:        # skip tps inside the bb if known
+                tp_indx += 1
             start_tp_idx = tp_indx
             B_prev = B
 

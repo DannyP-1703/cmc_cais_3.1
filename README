@@ -1,0 +1,2 @@
+Usage:
+    python3 restore_cfg.py <trace_filename.json> <graph_filename.dot>

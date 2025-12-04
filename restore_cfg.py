@@ -105,9 +105,10 @@ def restore_cfg(tracepoints: list[Tracepoint]) -> dict[int, BB]:
         tp_indx += 1
         start_tp_idx = tp_indx
 
-        # skip known bbs
+        # skip known bbs and manage foreign branches
         while True:
-            # check if bb jums to foreign target
+
+            # check if bb jums to a foreign target
             tp = tracepoints[start_tp_idx - 1]
             if tp.is_foreign_branch:
                 if tp.foreign_target_address in cfg:
@@ -122,20 +123,20 @@ def restore_cfg(tracepoints: list[Tracepoint]) -> dict[int, BB]:
                 break
 
             tp = tracepoints[start_tp_idx]
-            B = None
-            if tp.address in cfg:  # check if new address is start of known bb
-                B = cfg[tp.address]
-            else:  # otherwise if inside known bb -> split in two
-                split_jump_blocks = [bb for bb in cfg.values() if tp.address in bb]
-                assert len(split_jump_blocks) <= 1
-                if split_jump_blocks:
-                    B = split_jump_blocks[0].split(tp.address)
-                    cfg[B.start_address] = B
-
-            if B is None:
+            known_bbs = [bb for bb in cfg.values() if tp.address in bb]
+            assert len(known_bbs) <= 1, "Overlapping basic blocks detected"
+            if not known_bbs:
                 break
+
+            known_bb = known_bbs[0]
+            if known_bb.start_address == tp.address:    # check if new address is start of known bb
+                B = known_bb
+            else:                                       # otherwise inside known bb -> split in two
+                B = known_bb.split(tp.address)
+                cfg[B.start_address] = B
+
             make_edge(B_prev, B)
-            while tp_indx < trace_len and tracepoints[tp_indx].address in B:        # skip tps inside the bb if known
+            while tp_indx < trace_len and tracepoints[tp_indx].address in B:        # skip tps inside the known bb
                 tp_indx += 1
             start_tp_idx = tp_indx
             B_prev = B
@@ -148,7 +149,6 @@ def dump_cfg(cfg: dict[int, BB], entry_addr: int) -> str:
     visited = set()
     q = Queue()
     q.put(cfg[entry_addr])
-
     while not q.empty():
         bb: BB = q.get()
         if bb.start_address in visited:

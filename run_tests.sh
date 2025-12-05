@@ -1,5 +1,4 @@
-#!/bin/sh
-# run_tests.sh - run 5 tests for restore_cfg.py
+#!/bin/bash
 
 fail=0
 
@@ -7,7 +6,7 @@ for i in $(seq 1 5); do
     id=$(printf "%02d" "$i")
     json="PublicTests/${id}.json"
     out="tests/${id}.dot"
-    expect="tests/${id}-s.dot"
+    expect="tests/${id}-ref.dot"
 
     echo "=== Test $id ==="
     echo "Running: uv run restore_cfg.py $json $out"
@@ -29,12 +28,12 @@ for i in $(seq 1 5); do
         continue
     fi
 
-    if sort "$out" | diff - "$expect" >/dev/null 2>&1; then
+    if diff <(sort "$out") <(sort "$expect") >/dev/null 2>&1; then
         echo "PASS"
     else
         echo "FAIL: differences found between sorted $out and $expect"
         echo "Showing diff:"
-        sort "$out" | diff - "$expect"
+        diff <(sort "$out") <(sort "$expect")
         fail=1
     fi
 done

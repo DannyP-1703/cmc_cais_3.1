@@ -57,27 +57,21 @@ class BB:
     def __repr__(self):
         return self.label
 
-    def split(self, entry_address: Tracepoint) -> "BB":
-        assert entry_address in self
-
-        new_bb = BB(
-            entry_address,
-            self.size - entry_address + self.start_address,
-            label=self.__label,
-        )
-        new_bb.succs = [succ for succ in self.succs]
-
-        self.size = entry_address - self.start_address
-        self.succs = [new_bb]
-        return new_bb
-
 
 def make_edge(bb_from: BB, bb_to: BB):
     if not any(succ.start_address == bb_to.start_address for succ in bb_from.succs):
         bb_from.succs.append(bb_to)
 
 
-def restore_cfg(tracepoints: list[Tracepoint]) -> dict[int, BB]:
+def get_labels(tracepoints: list[Tracepoint]) -> set[int]:
+    labels: set[int] = set([tracepoints[0].address])
+    for i, tp in enumerate(tracepoints):
+        if tp.is_branch and i + 1 < len(tracepoints):
+            labels.add(tracepoints[i + 1].address)
+    return labels
+
+
+def restore_cfg(tracepoints: list[Tracepoint], labels: set[int]) -> dict[int, BB]:
     B: BB = None
     B_prev: BB = None
     cfg: dict[int, BB] = {}
@@ -88,12 +82,10 @@ def restore_cfg(tracepoints: list[Tracepoint]) -> dict[int, BB]:
     while tp_indx < trace_len:
         tp = tracepoints[tp_indx]
 
-        # bb ends on branch or when next tp is inside of known bb
-        if not tp.is_branch and tp_indx + 1 < trace_len:
-            next_addr = tracepoints[tp_indx + 1].address
-            if not any(next_addr in bb for bb in cfg.values()):
-                tp_indx += 1
-                continue
+        # bb ends on branch or when next tp is labeled
+        if not tp.is_branch and tp_indx + 1 < trace_len and tracepoints[tp_indx + 1].address not in labels:
+            tp_indx += 1
+            continue
 
         start_address = tracepoints[start_tp_idx].address
         end_address = tp.address + len(bytes.fromhex(tp.hexdump))
@@ -125,18 +117,11 @@ def restore_cfg(tracepoints: list[Tracepoint]) -> dict[int, BB]:
                 break
 
             tp = tracepoints[start_tp_idx]
-            known_bbs = [bb for bb in cfg.values() if tp.address in bb]
-            assert len(known_bbs) <= 1, "Overlapping basic blocks detected"
-            if not known_bbs:
+            if tp.address in cfg:
+                B = cfg[tp.address]
+            else:
                 break
-
-            known_bb = known_bbs[0]
-            if known_bb.start_address == tp.address:    # check if new address is start of known bb
-                B = known_bb
-            else:                                       # otherwise inside known bb -> split in two
-                B = known_bb.split(tp.address)
-                cfg[B.start_address] = B
-
+            
             make_edge(B_prev, B)
             while tp_indx < trace_len and tracepoints[tp_indx].address in B:        # skip tps inside the known bb
                 tp_indx += 1
@@ -170,7 +155,8 @@ if __name__ == "__main__":
     trace_filename = sys.argv[1]
     graph_filename = sys.argv[2]
     tracepoints = load_trace(trace_filename)
-    cfg = restore_cfg(tracepoints)
+    labels = get_labels(tracepoints)
+    cfg = restore_cfg(tracepoints, labels)
     dot_output = dump_cfg(cfg, tracepoints[0].address)
     with open(graph_filename, "w") as f:
         f.write(dot_output)

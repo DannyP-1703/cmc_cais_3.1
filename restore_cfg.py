@@ -88,10 +88,12 @@ def restore_cfg(tracepoints: list[Tracepoint]) -> dict[int, BB]:
     while tp_indx < trace_len:
         tp = tracepoints[tp_indx]
 
-        # bb ends on branch or when next tp is labeled
-        if not tp.is_branch and tp_indx + 1 < trace_len and tracepoints[tp_indx + 1].address not in cfg:
-            tp_indx += 1
-            continue
+        # bb ends on branch or when next tp is inside of known bb
+        if not tp.is_branch and tp_indx + 1 < trace_len:
+            next_addr = tracepoints[tp_indx + 1].address
+            if not any(next_addr in bb for bb in cfg.values()):
+                tp_indx += 1
+                continue
 
         start_address = tracepoints[start_tp_idx].address
         end_address = tp.address + len(bytes.fromhex(tp.hexdump))
